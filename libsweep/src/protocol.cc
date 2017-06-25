@@ -1,7 +1,8 @@
+#include "protocol.hpp"
+
 #include <chrono>
 #include <thread>
-
-#include "protocol.hpp"
+#include <array>
 
 namespace sweep {
 namespace protocol {
@@ -23,6 +24,46 @@ static uint8_t checksum_response_scan_packet(const response_scan_packet_s& v) {
   checksum += v.distance & 0x00ff;
   checksum += v.signal_strength;
   return checksum % 255;
+}
+
+namespace {
+class Resyncer {
+	static constexpr int PacketDataSize = sizeof(response_scan_packet_s) - 1;
+	std::array<std::uint16_t, PacketDataSize> accumulators{};
+	size_t cnt = 0;
+public:
+	bool add(std::uint8_t data) {
+		if (cnt > PacketDataSize ) {
+			if (accumulators[cnt % accumulators.size()] % 255 == data) {
+				// checksum matches - most likely we found a valid packet
+				return true;
+			} else {
+				accumulators[cnt % accumulators.size()] = data;
+			}
+		}
+		for (size_t i = 0; i < std::min(cnt,accumulators.size()); ++i) {
+			accumulators[i] += data;
+		}
+		cnt++;
+		return false;
+	}
+	size_t get_parsed_byte_cnt()const { return cnt; }
+};
+}
+
+bool resync_scan_response_stream(serial::device_s serial, int max_bytes) {
+	SWEEP_ASSERT(serial);
+	SWEEP_ASSERT(max_bytes >= static_cast<int>(sizeof(response_scan_packet_s)));
+
+	Resyncer resyncer;
+	bool found = false;
+
+	while (!found && resyncer.get_parsed_byte_cnt() < static_cast<size_t>(max_bytes)) {
+		std::uint8_t byte;
+		serial::device_read(serial, &byte, 1);
+		found = resyncer.add(byte);
+	}
+	return found;
 }
 
 void write_command(serial::device_s serial, const uint8_t cmd[2]) {

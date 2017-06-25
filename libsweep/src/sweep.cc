@@ -106,29 +106,36 @@ static void sweep_device_accumulate_scans(sweep_device_s device) try {
 
   while (!device->stop_thread && received < SWEEP_MAX_SAMPLES) {
 
-    const auto response = sweep::protocol::read_response_scan(device->serial);
+    try {
+      const auto response = sweep::protocol::read_response_scan(device->serial);
 
-    if (!response.has_error()) {
-      buffer[received] = parse_payload(response);
-      received++;
-    }
+      if (!response.has_error()) {
+        buffer[received] = parse_payload(response);
+        received++;
+      }
 
-    if (response.is_sync() && received > 1) {
+      if (response.is_sync() && received > 1) {
 
-      // package the previous scan without the sync reading from the subsequent scan
-      auto out = std::unique_ptr<sweep_scan>(new sweep_scan);
-      out->count = received - 1; // minus 1 to exclude sync reading
+        // package the previous scan without the sync reading from the subsequent scan
+        auto out = std::unique_ptr<sweep_scan>(new sweep_scan);
+        out->count = received - 1; // minus 1 to exclude sync reading
 
-      std::copy_n(std::begin(buffer), received - 1, std::begin(out->samples));
+        std::copy_n(std::begin(buffer), received - 1, std::begin(out->samples));
 
-      // place the scan in the queue
-      device->scan_queue.enqueue({std::move(out), nullptr});
+        // place the scan in the queue
+        device->scan_queue.enqueue({std::move(out), nullptr});
 
-      // place the sync reading at the start for the next scan
-      buffer[0] = buffer[received - 1];
+        // place the sync reading at the start for the next scan
+        buffer[0] = buffer[received - 1];
 
-      // reset received
-      received = 1;
+        // reset received
+        received = 1;
+      }
+    } catch (...) {
+      if (!sweep::protocol::resync_scan_response_stream(device->serial, sizeof(sweep::protocol::response_scan_packet_s) * 4)) {
+        throw;
+      }
+	  received = 0;
     }
   }
 } catch (...) {

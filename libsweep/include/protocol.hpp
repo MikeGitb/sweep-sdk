@@ -185,6 +185,8 @@ response_param_s read_response_param(sweep::serial::device_s serial, const uint8
 
 response_scan_packet_s read_response_scan(sweep::serial::device_s serial);
 
+bool resync_scan_response_stream(serial::device_s serial, int max_bytes);
+
 response_info_motor_ready_s read_response_info_motor_ready(sweep::serial::device_s serial);
 
 response_info_motor_speed_s read_response_info_motor_speed(sweep::serial::device_s serial);
