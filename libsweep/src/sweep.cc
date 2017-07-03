@@ -39,17 +39,31 @@ static sample parse_payload(const sweep::protocol::response_scan_packet_s& msg) 
   return ret;
 }
 
+namespace {
+struct Element {
+	std::unique_ptr<sweep_scan> scan;
+	std::exception_ptr error;
+};
+
+struct scan_queue : sweep::queue::queue<Element> {
+	using Base = sweep::queue::queue<Element>;
+	using Base::Base;
+
+	void push_scan(std::unique_ptr<sweep_scan>&& scan) {
+		this->push({ std::move(scan),nullptr });
+	}
+	void push_error(std::exception_ptr error) {
+		this->push({ nullptr,error });
+	}
+};
+
+}
+
 struct sweep_device {
   sweep::serial::device_s serial; // serial port communication
   bool is_scanning;
   std::atomic<bool> stop_thread;
-
-  struct Element {
-    std::unique_ptr<sweep_scan> scan;
-    std::exception_ptr error;
-  };
-
-  sweep::queue::queue<Element> scan_queue;
+  scan_queue queue;
 };
 
 // Constructor hidden from users
@@ -122,18 +136,17 @@ static void sweep_device_accumulate_scans(sweep_device_s device) try {
       std::copy_n(std::begin(buffer), received - 1, std::begin(out->samples));
 
       // place the scan in the queue
-      device->scan_queue.enqueue({std::move(out), nullptr});
+      device->queue.push_scan(std::move(out));
 
       // place the sync reading at the start for the next scan
       buffer[0] = buffer[received - 1];
 
-      // reset received
       received = 1;
     }
   }
 } catch (...) {
   // worker thread is dead at this point
-  device->scan_queue.enqueue({nullptr, std::current_exception()});
+  device->queue.push_error(std::current_exception());
 }
 
 // Attempts to start scanning without waiting for motor ready. Can error on failure.
@@ -264,7 +277,7 @@ void sweep_device_start_scanning(sweep_device_s device, sweep_error_s* error) tr
   sweep_device_attempt_start_scanning(device, error);
 
   // Start SCAN WORKER
-  device->scan_queue.clear();
+  device->queue.clear();
   device->is_scanning = true;
   // START background worker thread
   device->stop_thread = false;
@@ -322,7 +335,7 @@ sweep_scan_s sweep_device_get_scan(sweep_device_s device, sweep_error_s* error) 
   SWEEP_ASSERT(error);
   SWEEP_ASSERT(device->is_scanning);
 
-  auto out = device->scan_queue.dequeue();
+  auto out = device->queue.pop();
 
   if (out.error != nullptr) {
     std::rethrow_exception(out.error);

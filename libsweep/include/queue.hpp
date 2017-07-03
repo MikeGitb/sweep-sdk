@@ -6,13 +6,12 @@
  * Implementation detail; not exported.
  */
 
-#include <stdint.h>
+#include <cstdint>
 
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <queue>
-#include <utility>
 
 namespace sweep {
 namespace queue {
@@ -30,7 +29,7 @@ public:
   }
 
   // Add an element to the queue.
-  void enqueue(T v) {
+  void push(T v) {
     std::lock_guard<std::mutex> lock(the_mutex);
 
     // if necessary, remove the oldest scan to make room for new
@@ -42,7 +41,7 @@ public:
   }
 
   // If the queue is empty, wait till an element is avaiable.
-  T dequeue() {
+  T pop() {
     std::unique_lock<std::mutex> lock(the_mutex);
     // wait until queue is not empty
     while (the_queue.empty()) {
@@ -55,8 +54,19 @@ public:
     return v;
   }
 
+  bool try_pop(T& v) {
+    std::unique_lock<std::mutex> lock(the_mutex);
+    if (the_queue.empty()) {
+      return false;
+    } else {
+      v = std::move(the_queue.front());
+      the_queue.pop();
+      return true;
+    }
+  }
+
 private:
-  int32_t max_size;
+  std::int32_t max_size;
   std::queue<T> the_queue;
   mutable std::mutex the_mutex;
   mutable std::condition_variable the_cond_var;
