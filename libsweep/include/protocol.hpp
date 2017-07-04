@@ -12,6 +12,7 @@
 #include "sweep.h"
 
 #include <stdint.h>
+#include <array>
 
 namespace sweep {
 namespace protocol {
@@ -20,6 +21,9 @@ struct error : sweep::error::error {
   using base = sweep::error::error;
   using base::base;
 };
+
+inline std::array<uint8_t,2> integral_to_ascii_bytes(const int32_t integral);
+inline int32_t ascii_bytes_to_integral(const uint8_t bytes[2]);
 
 // Command Symbols
 
@@ -48,10 +52,12 @@ struct cmd_packet_s {
 static_assert(sizeof(cmd_packet_s) == 3, "cmd packet size mismatch");
 
 struct cmd_param_packet_s {
-  uint8_t cmdByte1;
-  uint8_t cmdByte2;
-  uint8_t cmdParamByte1;
-  uint8_t cmdParamByte2;
+  //uint8_t cmdByte1;
+  //uint8_t cmdByte2;
+  //uint8_t cmdParamByte1;
+  //uint8_t cmdParamByte2;
+  std::array<uint8_t, 2> cmd;
+  std::array<uint8_t, 2> param;
   uint8_t cmdParamTerm;
 };
 
@@ -64,6 +70,15 @@ struct response_header_s {
   uint8_t cmdStatusByte2;
   uint8_t cmdSum;
   uint8_t term1;
+
+  uint8_t calc_checksum() {
+    return ((cmdStatusByte1 + cmdStatusByte2) & 0x3F) + 0x30;
+  }
+
+  int32_t get_status_code() const {
+    const uint8_t status_bytes[2] = {cmdStatusByte1, cmdStatusByte2};
+    return sweep::protocol::ascii_bytes_to_integral(status_bytes);
+  }
 };
 
 static_assert(sizeof(response_header_s) == 6, "response header size mismatch");
@@ -78,6 +93,15 @@ struct response_param_s {
   uint8_t cmdStatusByte2;
   uint8_t cmdSum;
   uint8_t term2;
+
+  uint8_t calc_checksum() {
+    return ((cmdStatusByte1 + cmdStatusByte2) & 0x3F) + 0x30;
+  }
+
+  int32_t get_status_code() const {
+    const uint8_t status_bytes[2] = {cmdStatusByte1, cmdStatusByte2};
+    return sweep::protocol::ascii_bytes_to_integral(status_bytes);
+  }
 };
 
 static_assert(sizeof(response_param_s) == 9, "response param size mismatch");
@@ -109,6 +133,17 @@ struct response_scan_packet_s {
   int get_angle_millideg() const {
     // angle is transmitted as fixed point integer with scaling factor of 16
     return static_cast<int>(angle * 1000 / 16.0f);
+  }
+
+  uint8_t calc_checksum() const {
+    uint64_t checksum = 0;
+    checksum += sync_error;
+    checksum += angle & 0xff00;
+    checksum += angle & 0x00ff;
+    checksum += distance & 0xff00;
+    checksum += distance & 0x00ff;
+    checksum += signal_strength;
+    return checksum % 255;
   }
 };
 
@@ -148,6 +183,8 @@ struct response_info_motor_ready_s {
   uint8_t cmdByte2;
   uint8_t motor_ready[2];
   uint8_t term;
+
+  int32_t get_motor_ready_code() const { return sweep::protocol::ascii_bytes_to_integral(motor_ready); }
 };
 
 static_assert(sizeof(response_info_motor_ready_s) == 5, "response info motor ready size mismatch");
@@ -157,6 +194,8 @@ struct response_info_motor_speed_s {
   uint8_t cmdByte2;
   uint8_t motor_speed[2];
   uint8_t term;
+
+  int32_t get_motor_speed() const { return sweep::protocol::ascii_bytes_to_integral(motor_speed); }
 };
 
 static_assert(sizeof(response_info_motor_speed_s) == 5, "response info motor speed size mismatch");
@@ -166,6 +205,8 @@ struct response_info_sample_rate_s {
   uint8_t cmdByte2;
   uint8_t sample_rate[2];
   uint8_t term;
+
+  int32_t get_sample_rate_code() const { return sweep::protocol::ascii_bytes_to_integral(sample_rate); }
 };
 
 static_assert(sizeof(response_info_sample_rate_s) == 5, "response info sample rate size mismatch");
@@ -191,10 +232,10 @@ response_info_motor_speed_s read_response_info_motor_speed(sweep::serial::device
 
 response_info_sample_rate_s read_response_info_sample_rate(sweep::serial::device_s serial);
 
-inline void integral_to_ascii_bytes(const int32_t integral, uint8_t bytes[2]) {
+inline std::array<uint8_t, 2> integral_to_ascii_bytes(const int32_t integral) {
   SWEEP_ASSERT(integral >= 0);
   SWEEP_ASSERT(integral <= 99);
-  SWEEP_ASSERT(bytes);
+  std::array<uint8_t, 2> bytes;
 
   // Numbers begin at ASCII code point 48
   const uint8_t ASCIINumberBlockOffset = '0';
@@ -204,6 +245,8 @@ inline void integral_to_ascii_bytes(const int32_t integral, uint8_t bytes[2]) {
 
   bytes[0] = num1;
   bytes[1] = num2;
+
+  return bytes;
 }
 
 inline int32_t ascii_bytes_to_integral(const uint8_t bytes[2]) {

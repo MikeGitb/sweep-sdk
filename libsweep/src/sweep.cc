@@ -148,12 +148,10 @@ static void sweep_device_attempt_start_scanning(sweep_device_s device, sweep_err
 
   sweep::protocol::write_command(device->serial, sweep::protocol::DATA_ACQUISITION_START);
 
-  auto response = sweep::protocol::read_response_header(device->serial, sweep::protocol::DATA_ACQUISITION_START);
+  const auto response = sweep::protocol::read_response_header(device->serial, sweep::protocol::DATA_ACQUISITION_START);
 
   // Check the status bytes do not indicate failure
-  const uint8_t status_bytes[2] = {response.cmdStatusByte1, response.cmdStatusByte2};
-  int32_t status_code = sweep::protocol::ascii_bytes_to_integral(status_bytes);
-  switch (status_code) {
+  switch (response.get_status_code()) {
   case 12:
     *error = sweep_error_construct("Failed to start scanning because motor speed has not stabilized.");
     return;
@@ -174,17 +172,14 @@ static void sweep_device_attempt_set_motor_speed(sweep_device_s device, int32_t 
   SWEEP_ASSERT(error);
   SWEEP_ASSERT(!device->is_scanning);
 
-  uint8_t args[2] = {0};
-  sweep::protocol::integral_to_ascii_bytes(hz, args);
+  const auto args = sweep::protocol::integral_to_ascii_bytes(hz);
 
-  sweep::protocol::write_command_with_arguments(device->serial, sweep::protocol::MOTOR_SPEED_ADJUST, args);
+  sweep::protocol::write_command_with_arguments(device->serial, sweep::protocol::MOTOR_SPEED_ADJUST, args.data());
 
   const auto response = sweep::protocol::read_response_param(device->serial, sweep::protocol::MOTOR_SPEED_ADJUST);
 
   // Check the status bytes do not indicate failure
-  const uint8_t status_bytes[2] = {response.cmdStatusByte1, response.cmdStatusByte2};
-  int32_t status_code = sweep::protocol::ascii_bytes_to_integral(status_bytes);
-  switch (status_code) {
+  switch (response.get_status_code()) {
   case 11:
     *error = sweep_error_construct("Failed to set motor speed because provided parameter was invalid.");
     return;
@@ -396,7 +391,7 @@ int32_t sweep_device_get_sample_rate(sweep_device_s device, sweep_error_s* error
   const auto response = sweep::protocol::read_response_info_sample_rate(device->serial);
 
   // 01: 500-600Hz, 02: 750-800Hz, 03: 1000-1050Hz
-  int32_t code = sweep::protocol::ascii_bytes_to_integral(response.sample_rate);
+  int32_t code = response.get_sample_rate_code();
   int32_t rate = 0;
 
   switch (code) {
@@ -442,17 +437,14 @@ void sweep_device_set_sample_rate(sweep_device_s device, int32_t hz, sweep_error
     SWEEP_ASSERT(false && "sample rate unknown");
   }
 
-  uint8_t args[2] = {0};
-  sweep::protocol::integral_to_ascii_bytes(code, args);
+  std::array<uint8_t,2> args =  sweep::protocol::integral_to_ascii_bytes(code);
 
-  sweep::protocol::write_command_with_arguments(device->serial, sweep::protocol::SAMPLE_RATE_ADJUST, args);
+  sweep::protocol::write_command_with_arguments(device->serial, sweep::protocol::SAMPLE_RATE_ADJUST, args.data());
 
   const auto response = sweep::protocol::read_response_param(device->serial, sweep::protocol::SAMPLE_RATE_ADJUST);
 
   // Check the status bytes do not indicate failure
-  const uint8_t status_bytes[2] = {response.cmdStatusByte1, response.cmdStatusByte2};
-  int32_t status_code = sweep::protocol::ascii_bytes_to_integral(status_bytes);
-  switch (status_code) {
+  switch (response.get_status_code()) {
   case 11:
     *error = sweep_error_construct("Failed to set motor speed because provided parameter was invalid.");
     return;
@@ -492,8 +484,6 @@ int32_t sweep_scan_get_signal_strength(sweep_scan_s scan, int32_t sample) {
 }
 
 void sweep_scan_destruct(sweep_scan_s scan) {
-  SWEEP_ASSERT(scan);
-
   delete scan;
 }
 
